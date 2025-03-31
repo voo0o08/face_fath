@@ -1,25 +1,25 @@
 '''
-drawing2 -> turtle로 그림 그리는 파일
+drawing2_txt -> drawing2를 텍스트 파일로 저장하는 파일
 '''
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.spatial import distance
 
 # 파라미터
 MIN_DIST = 3.0  # 최소 점 간 거리
 IMG_PATH = "./data/test.jpg"
 
+# 좌표 변환 범위
+X_MIN, X_MAX = -800, -650
+Y_MIN, Y_MAX = -400, -200
+
 # 이미지 불러오기 및 전처리
 image = cv2.imread(IMG_PATH)
-if image is None:
-    raise FileNotFoundError("이미지를 찾을 수 없습니다.")
-
 bilateral = cv2.bilateralFilter(image, 9, 75, 75)
 gray = cv2.cvtColor(bilateral, cv2.COLOR_BGR2GRAY)
 edges = cv2.Canny(gray, 50, 150)
 
-# Skeletonization
+# Skeletonization 함수
 def skeletonize(img):
     skel = np.zeros(img.shape, np.uint8)
     element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
@@ -35,52 +35,31 @@ def skeletonize(img):
 
 skeleton = skeletonize(edges)
 
-# (y, x) 좌표 추출
+# (y, x) 좌표 추출 및 경로 최적화
 points = np.column_stack(np.where(skeleton > 0))
 visited = np.zeros(len(points), dtype=bool)
 path = []
 
-# 시작점: 가장 왼쪽 위 점
 current_idx = np.argmin(points[:, 0] + points[:, 1])
 current_point = points[current_idx]
 visited[current_idx] = True
 path.append(tuple(current_point))
 
-# TSP-like 연결 (가장 가까운 점 찾기)
 while not np.all(visited):
     dists = distance.cdist([current_point], points[~visited])
     nearest_idx_in_unvisited = np.argmin(dists)
     global_idx = np.where(~visited)[0][nearest_idx_in_unvisited]
     if dists[0, nearest_idx_in_unvisited] < MIN_DIST:
         visited[global_idx] = True
-        continue  # 너무 가까우면 스킵
+        continue
     current_point = points[global_idx]
     visited[global_idx] = True
     path.append(tuple(current_point))
 
-# 결과 이미지 생성
-draw_img = np.ones_like(image) * 255
-cnt = 0
-for pt in path:
-    cnt += 1
-    cv2.circle(draw_img, (pt[1], pt[0]), 1, (0, 0, 0), -1)
-print(f"cnt => {cnt}")
+# draw_img에 그려진 점만 수집
+drawn_points_set = set(tuple(pt) for pt in path)
 
-# 저장 및 확인
-cv2.imwrite("path_thinned.png", draw_img)
-plt.imshow(cv2.cvtColor(draw_img, cv2.COLOR_BGR2RGB))
-plt.title("Optimized Drawing Path")
-plt.axis("off")
-plt.show()
-
-#############################
-# path를 여러 개의 선으로 나누고, turtle로 뗐다 붙였다 그리는 버전
-import turtle
-
-# 거리 기준 (너무 멀면 새 선으로 인식)
-BREAK_DIST = 15.0
-
-# path를 여러 선으로 분할
+# path 분할 (선별 경계 기준)
 def split_path_into_lines(path, break_dist=15.0):
     lines = []
     current_line = [path[0]]
@@ -96,32 +75,35 @@ def split_path_into_lines(path, break_dist=15.0):
         lines.append(current_line)
     return lines
 
-# 좌표 변환용
-h, w = 600, 800
-scale_x = 800 / w
-scale_y = 600 / h
-
-# Turtle 설정
-turtle.speed(0)
-turtle.bgcolor("white")
-turtle.pensize(1)
-screen = turtle.Screen()
-screen.setup(width=800, height=600)
-colors = ["black", "red", "blue", "green", "purple", "orange"]
-
-# 선 분할
 lines = split_path_into_lines(path)
 
-# 그리기
-for idx, line in enumerate(lines):
-    if len(line) == 0:
-        continue
-    turtle.penup()
-    y, x = line[0]
-    turtle.goto(x * scale_x - 400, 300 - y * scale_y)
-    turtle.pencolor(colors[idx % len(colors)])
-    turtle.pendown()
-    for y, x in line[1:]:
-        turtle.goto(x * scale_x - 400, 300 - y * scale_y)
+# 텍스트 저장용 좌표 변환 함수
+h, w = gray.shape
+def convert_coord(x, y):
+    new_x = ((x / w) * (X_MAX - X_MIN)) + X_MIN
+    new_y = ((y / h) * (Y_MAX - Y_MIN)) + Y_MIN
+    return round(new_x, 2), round(new_y, 2)
 
-turtle.done()
+# 텍스트 라인 생성
+output_lines = []
+for line in lines:
+    if len(line) < 2:
+        continue
+    start_y, start_x = line[0]
+    sx, sy = convert_coord(start_x, start_y)
+    output_lines.append(f"{sx},{sy},170.0,90.03,0.35,-86.91")
+    for y, x in line[1:-1]:
+        if (y, x) in drawn_points_set:
+            cx, cy = convert_coord(x, y)
+            output_lines.append(f"{cx},{cy},160.0,90.03,0.35,-86.91")
+    end_y, end_x = line[-1]
+    ex, ey = convert_coord(end_x, end_y)
+    output_lines.append(f"{ex},{ey},170.0,90.03,0.35,-86.91")
+
+# 파일로 저장
+output_path = "./data/turtle_coordinates.txt"
+with open(output_path, "w") as f:
+    for line in output_lines:
+        f.write(line + "\n")
+
+output_path
