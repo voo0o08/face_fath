@@ -1,14 +1,16 @@
 '''
 drawing2 -> turtle로 그림 그리는 파일
+while문 안에 넣어서 line 길이 넘어가면 MIN_DIST 0.2 씩 추가해서 다시 생성 
 '''
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import distance
 
+
 # 파라미터
-MIN_DIST = 3.0  # 최소 점 간 거리
-IMG_PATH = "./data/test.jpg"
+MIN_DIST = 5.5  # 최소 점 간 거리
+IMG_PATH = "./data/test2_result3.png"
 
 # 이미지 불러오기 및 전처리
 image = cv2.imread(IMG_PATH)

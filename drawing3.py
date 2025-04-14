@@ -3,11 +3,15 @@ import numpy as np
 import mediapipe as mp
 import turtle
 import matplotlib.pyplot as plt
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 
 # ====================
 # 1. 이미지 로드
 # ====================
-image_path = "./data/test.jpg"
+image_path = "./data/test2.png"
+image_path = "./data/test3.jpg"
+
 image = cv2.imread(image_path)
 if image is None:
     raise FileNotFoundError("이미지를 찾을 수 없습니다.")
@@ -15,42 +19,41 @@ image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 h, w, _ = image.shape
 
 # ====================
-# 2. Mediapipe 얼굴 인식
+# 2. Mediapipe Mesh 기반 얼굴 인식
 # ====================
-mp_face = mp.solutions.face_mesh
-with mp_face.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as face_mesh:
-    results = face_mesh.process(image_rgb)
+model_path = r'C:\Users\pdbst\Desktop\face_drawing\mediapipe_study\face_landmarker.task'
+base_options = python.BaseOptions(model_asset_path=model_path)
+options = vision.FaceLandmarkerOptions(
+    base_options=base_options,
+    num_faces=1,
+    running_mode=vision.RunningMode.IMAGE)
+detector = vision.FaceLandmarker.create_from_options(options)
+mp_image = mp.Image.create_from_file(image_path)
+detection_result = detector.detect(mp_image)
 
-if not results.multi_face_landmarks:
-    raise RuntimeError("얼굴을 찾을 수 없습니다.")
+if not detection_result.face_landmarks:
+    raise RuntimeError("얼굴이 감지되지 않았습니다.")
 
-# ====================
-# 3. Landmark 기준 얼굴 영역 가져오기
-# ====================
-landmarks = results.multi_face_landmarks[0].landmark
-xs = [int(lm.x * w) for lm in landmarks]
-ys = [int(lm.y * h) for lm in landmarks]
-x_min = max(0, min(xs) - 10)
-x_max = min(w, max(xs) + 10)
-y_min = max(0, min(ys) - 10)
-y_max = min(h, max(ys) + 10)
+# 151번 좌표를 기준으로 y_min 결정
+landmarks = detection_result.face_landmarks[0]
+x151 = int(landmarks[151].x * w)
+y151 = int(landmarks[151].y * h)
+y_min = y151
 
-# 얼굴 특징점 시각화 (눈, 코, 입)
-landmark_img = image.copy()
-for x, y in zip(xs, ys):
-    cv2.circle(landmark_img, (x, y), 1, (0, 255, 0), -1)
-
-cv2.imshow("Face landmarks", landmark_img)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+# Bounding box 생성
+x_coords = [int(l.x * w) for l in landmarks]
+y_coords = [int(l.y * h) for l in landmarks]
+x_min, x_max = min(x_coords), max(x_coords)
+y_max = max(y_coords)
 
 # ====================
-# 4. 얼굴 영역 정교화
+# 3. 얼굴 영역 정교화
 # ====================
 face_crop = image[y_min:y_max, x_min:x_max]
 gray_face = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
 face_edges = cv2.Canny(gray_face, 30, 100)
 
+# skeletonize 함수 정의
 def skeletonize(img):
     skel = np.zeros(img.shape, np.uint8)
     element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
@@ -67,34 +70,33 @@ def skeletonize(img):
 face_skel = skeletonize(face_edges)
 
 # ====================
-# 5. 배경 단순화
+# 4. 배경 영역 단순화 (blur 처리)
 # ====================
-mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
-mask[y_min:y_max, x_min:x_max] = 0
-background = cv2.bitwise_and(image, image, mask=mask)
-gray_bg = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
+blurred_image = image.copy()
+blurred_image[y_min:y_max, x_min:x_max] = cv2.GaussianBlur(
+    blurred_image[y_min:y_max, x_min:x_max], (31, 31), 0)
+gray_bg = cv2.cvtColor(blurred_image, cv2.COLOR_BGR2GRAY)
 bg_edges = cv2.Canny(gray_bg, 100, 200)
 
-cv2.imshow("bg_edges", mask)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
-
 # ====================
-# 6. 합치기
+# 5. 합치기
 # ====================
-final_edges = np.zeros_like(gray_bg)
+final_edges = bg_edges.copy()
 final_edges[y_min:y_max, x_min:x_max] = face_skel
-final_edges += bg_edges
 
 # ====================
-# 7. Contour 추출 및 Turtle 그리기
+# 6. Contour로 path 만들기
 # ====================
 contours, _ = cv2.findContours(final_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+# ====================
+# 7. Turtle로 그리기
+# ====================
 screen = turtle.Screen()
 screen.setup(width=800, height=600)
 turtle.speed(0)
 turtle.bgcolor("white")
+turtle.pensize(1)
 scale_x = 800 / w
 scale_y = 600 / h
 
